@@ -1,0 +1,21 @@
+# 필수 증거 체크리스트 판정(실제 상태를 다시 조회해 판정한다)
+# 실행 시각: 2026-09-15 13:40:02 KST  호스트: agent-server  커널: 5.15.167.4-microsoft-standard-WSL2
+[PASS] SSH 포트 20022 리슨, PermitRootLogin no
+[PASS] root SSH 접속 거부 기록
+[PASS] UFW 활성, 허용 규칙은 20022/tcp·15034/tcp 뿐
+[PASS] 계정 3개와 그룹 소속
+[PASS] upload_files=agent-common rwx, api_keys·로그=agent-core rwx
+[PASS] agent-test 는 api_keys 접근 불가
+[PASS] Boot Sequence 5단계 [OK] 와 Agent READY
+[PASS] 앱이 0.0.0.0:15034 LISTEN, 실행 계정 agent-admin
+[PASS] monitor.sh 위치/소유/권한
+[PASS] monitor.log 형식
+[PASS] agent-admin crontab 매분 등록
+[PASS] cron 자동 실행으로 로그 증가
+
+$ tail -5 /var/log/agent-app/monitor.log
+[2026-09-15 13:37:38] [ERROR] port 15999 is not listening (PID:648)
+[2026-09-15 13:37:43] PID:648 CPU:1.4% MEM:10.5% DISK_USED:1%
+[2026-09-15 13:38:03] PID:648 CPU:3.1% MEM:10.2% DISK_USED:1%
+[2026-09-15 13:39:02] PID:648 CPU:2.9% MEM:12.8% DISK_USED:1%
+[2026-09-15 13:40:02] PID:648 CPU:4.4% MEM:10.4% DISK_USED:1%

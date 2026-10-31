@@ -1,0 +1,68 @@
+# UFW 활성화와 20022/tcp, 15034/tcp 만 허용
+# 실행 시각: 2026-09-15 13:37:28 KST  호스트: agent-server  커널: 5.15.167.4-microsoft-standard-WSL2
+
+## 초기화(다시 실행해도 같은 규칙만 남도록)
+
+$ ufw --force reset
+Backing up 'user.rules' to '/etc/ufw/user.rules.20260915_133728'
+Backing up 'before.rules' to '/etc/ufw/before.rules.20260915_133728'
+Backing up 'after.rules' to '/etc/ufw/after.rules.20260915_133728'
+Backing up 'user6.rules' to '/etc/ufw/user6.rules.20260915_133728'
+Backing up 'before6.rules' to '/etc/ufw/before6.rules.20260915_133728'
+Backing up 'after6.rules' to '/etc/ufw/after6.rules.20260915_133728'
+
+
+## 기본 정책과 허용 규칙
+
+$ ufw default deny incoming
+Default incoming policy changed to 'deny'
+(be sure to update your rules accordingly)
+
+$ ufw default allow outgoing
+Default outgoing policy changed to 'allow'
+(be sure to update your rules accordingly)
+
+$ ufw allow 20022/tcp comment 'SSH'
+Rules updated
+Rules updated (v6)
+
+$ ufw allow 15034/tcp comment 'AGENT APP'
+Rules updated
+Rules updated (v6)
+
+$ ufw --force enable
+Firewall is active and enabled on system startup
+
+## 검증
+
+$ ufw status verbose
+Status: active
+Logging: on (low)
+Default: deny (incoming), allow (outgoing), deny (routed)
+New profiles: skip
+
+To                         Action      From
+--                         ------      ----
+20022/tcp                  ALLOW IN    Anywhere                   # SSH
+15034/tcp                  ALLOW IN    Anywhere                   # AGENT APP
+20022/tcp (v6)             ALLOW IN    Anywhere (v6)              # SSH
+15034/tcp (v6)             ALLOW IN    Anywhere (v6)              # AGENT APP
+
+
+$ ufw status numbered
+Status: active
+
+     To                         Action      From
+     --                         ------      ----
+[ 1] 20022/tcp                  ALLOW IN    Anywhere                   # SSH
+[ 2] 15034/tcp                  ALLOW IN    Anywhere                   # AGENT APP
+[ 3] 20022/tcp (v6)             ALLOW IN    Anywhere (v6)              # SSH
+[ 4] 15034/tcp (v6)             ALLOW IN    Anywhere (v6)              # AGENT APP
+
+
+$ grep '^ENABLED' /etc/ufw/ufw.conf
+ENABLED=yes
+# 22/tcp 규칙이 없어야 한다(기본 SSH 포트는 막힘):
+
+$ ufw status | grep -E '^22/tcp' || echo '22/tcp 허용 규칙 없음'
+22/tcp 허용 규칙 없음

@@ -1,0 +1,4 @@
+# 컨테이너 안에서 실행하는 스크립트는 LF 로 고정한다. CRLF 면 bash 가 '$'\r': command not found' 로 멈춘다.
+*.sh  text eol=lf
+*.env text eol=lf
+Dockerfile text eol=lf

@@ -1,0 +1,135 @@
+# monitor.sh 배치(agent-dev:agent-core 750)와 실행 결과
+# 실행 시각: 2026-09-15 13:37:35 KST  호스트: agent-server  커널: 5.15.167.4-microsoft-standard-WSL2
+
+## 배치: 작성자 agent-dev 가 설치
+
+agent-dev$ for f in monitor.sh report.sh log-retention.sh; do install -m 750 -g agent-core /tmp/$f $AGENT_HOME/bin/$f; done
+
+$ stat -c '%U:%G %a %n' /home/agent-admin/agent-app/bin/*.sh
+agent-dev:agent-core 750 /home/agent-admin/agent-app/bin/log-retention.sh
+agent-dev:agent-core 750 /home/agent-admin/agent-app/bin/monitor.sh
+agent-dev:agent-core 750 /home/agent-admin/agent-app/bin/report.sh
+
+## sudoers: agent-admin 에게 방화벽 상태 조회 한 가지만 허용
+
+$ cat /etc/sudoers.d/agent-monitor && visudo -cf /etc/sudoers.d/agent-monitor
+agent-admin ALL=(root) NOPASSWD: /usr/sbin/ufw status
+/etc/sudoers.d/agent-monitor: parsed OK
+
+agent-admin$ sudo -n -l
+Matching Defaults entries for agent-admin on agent-server:
+    env_reset, mail_badpass, secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin\:/snap/bin, use_pty
+
+User agent-admin may run the following commands on agent-server:
+    (root) NOPASSWD: /usr/sbin/ufw status
+
+## 정상 실행(cron 실행 계정 agent-admin)
+
+agent-admin$ $AGENT_HOME/bin/monitor.sh; echo "exit=$?"
+====== SYSTEM MONITOR RESULT ======
+
+[HEALTH CHECK]
+Checking process 'agent-app'... [OK] (PID: 648)
+Checking port 15034... [OK]
+
+[STATUS CHECK]
+Firewall (ufw) : active
+
+[RESOURCE MONITORING]
+CPU Usage : 1.3%
+MEM Usage : 9.7%
+DISK Used : 1%
+
+
+====== STATISTICS REPORT ======
+[CPU]
+Average : 1.3%
+Maximum : 1.3% at 2026-09-15 13:37:36
+Minimum : 1.3% at 2026-09-15 13:37:36
+[Memory]
+Average : 9.7%
+Maximum : 9.7% at 2026-09-15 13:37:36
+Minimum : 9.7% at 2026-09-15 13:37:36
+[Samples]
+Data Points: 1 samples
+
+[INFO] Log appended: /var/log/agent-app/monitor.log
+exit=0
+
+agent-admin$ $AGENT_HOME/bin/monitor.sh > /dev/null; $AGENT_HOME/bin/monitor.sh > /dev/null; tail -3 $AGENT_LOG_DIR/monitor.log
+[2026-09-15 13:37:36] PID:648 CPU:1.3% MEM:9.7% DISK_USED:1%
+[2026-09-15 13:37:37] PID:648 CPU:1.1% MEM:10.0% DISK_USED:1%
+[2026-09-15 13:37:38] PID:648 CPU:1.7% MEM:10.0% DISK_USED:1%
+
+## 권한 없는 계정(agent-test)은 실행할 수 없다
+
+agent-test$ $AGENT_HOME/bin/monitor.sh; echo "exit=$?"
+-bash: line 1: /home/agent-admin/agent-app/bin/monitor.sh: Permission denied
+exit=126
+
+## Health Check 실패 시 exit 1
+
+agent-admin$ MONITOR_PROCESS=no-such-app $AGENT_HOME/bin/monitor.sh; echo "exit=$?"
+====== SYSTEM MONITOR RESULT ======
+
+[HEALTH CHECK]
+Checking process 'no-such-app'... [FAIL]
+exit=1
+
+agent-admin$ MONITOR_PORT=15999 $AGENT_HOME/bin/monitor.sh; echo "exit=$?"
+====== SYSTEM MONITOR RESULT ======
+
+[HEALTH CHECK]
+Checking process 'agent-app'... [OK] (PID: 648)
+Checking port 15999... [FAIL]
+exit=1
+
+$ tail -2 /var/log/agent-app/monitor.log
+[2026-09-15 13:37:38] [ERROR] process 'no-such-app' is not running
+[2026-09-15 13:37:38] [ERROR] port 15999 is not listening (PID:648)
+
+## 방화벽 비활성: [WARNING] 만 출력하고 계속 진행
+
+$ ufw disable
+Firewall stopped and disabled on system startup
+
+agent-admin$ $AGENT_HOME/bin/monitor.sh | sed -n "/STATUS CHECK/,/INFO/p"; echo "exit=${PIPESTATUS[0]}"
+[STATUS CHECK]
+Firewall (ufw) : inactive
+
+[RESOURCE MONITORING]
+CPU Usage : 1.4%
+MEM Usage : 10.5%
+DISK Used : 1%
+
+[WARNING] Firewall is not active
+[WARNING] MEM threshold exceeded (10.5% > 10%)
+
+====== STATISTICS REPORT ======
+[CPU]
+Average : 1.4%
+Maximum : 1.7% at 2026-09-15 13:37:38
+Minimum : 1.1% at 2026-09-15 13:37:37
+[Memory]
+Average : 10.1%
+Maximum : 10.5% at 2026-09-15 13:37:43
+Minimum : 9.7% at 2026-09-15 13:37:36
+[Samples]
+Data Points: 4 samples
+
+[INFO] Log appended: /var/log/agent-app/monitor.log
+exit=0
+
+$ ufw --force enable && ufw status | head -1
+Firewall is active and enabled on system startup
+Status: active
+
+## 로그 용량 관리: 한도를 300바이트, 보관 4개로 낮춰 회전을 재현(운영값 10MB/10개)
+
+agent-admin$ rm -rf /tmp/rotate-demo && mkdir -p /tmp/rotate-demo && for i in $(seq 1 12); do MONITOR_LOG=/tmp/rotate-demo/monitor.log MONITOR_MAX_BYTES=300 MONITOR_KEEP=4 $AGENT_HOME/bin/monitor.sh | grep rotated; done; ls -l /tmp/rotate-demo
+[INFO] Log rotated: /tmp/rotate-demo/monitor.log (310 bytes >= 300)
+[INFO] Log rotated: /tmp/rotate-demo/monitor.log (310 bytes >= 300)
+total 12
+-rw-rw---- 1 agent-admin agent-admin 124 Sep 15 13:37 monitor.log
+-rw-rw---- 1 agent-admin agent-admin 310 Sep 15 13:37 monitor.log.1
+-rw-rw---- 1 agent-admin agent-admin 310 Sep 15 13:37 monitor.log.2

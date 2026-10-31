@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+dist/
+
+# Python cache & environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+venv/
+env/
+.env
+.env.local
+
+# Databases
+*.db
+*.sqlite3
+
+# OS metadata
+.DS_Store
+Thumbs.db

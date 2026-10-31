@@ -1,0 +1,89 @@
+# 보너스: report.sh 통계, 로그 압축/아카이브/삭제
+# 실행 시각: 2026-09-15 13:40:02 KST  호스트: agent-server  커널: 5.15.167.4-microsoft-standard-WSL2
+
+## 보너스 1: 전체 구간 통계
+
+agent-admin$ $AGENT_HOME/bin/report.sh
+  ====== STATISTICS REPORT ======
+  Range : 2026-09-15 13:37:36 ~ 2026-09-15 13:39:02
+  [CPU]
+    Average : 1.9%
+    Maximum : 3.1% at 2026-09-15 13:38:03
+    Minimum : 1.1% at 2026-09-15 13:37:37
+  [Memory]
+    Average : 10.5%
+    Maximum : 12.8% at 2026-09-15 13:39:02
+    Minimum : 9.7% at 2026-09-15 13:37:36
+  [Disk]
+    Average : 1.0%
+    Maximum : 1.0% at 2026-09-15 13:37:36
+    Minimum : 1.0% at 2026-09-15 13:37:36
+  [Samples]
+    Data Points: 6 samples
+
+## 보너스 1: 최근 2분 구간만
+
+agent-admin$ $AGENT_HOME/bin/report.sh "$(date -d "-2 min" "+%F %T")" "$(date "+%F %T")"
+  ====== STATISTICS REPORT ======
+  Range : 2026-09-15 13:38:03 ~ 2026-09-15 13:39:02
+  [CPU]
+    Average : 3.0%
+    Maximum : 3.1% at 2026-09-15 13:38:03
+    Minimum : 2.9% at 2026-09-15 13:39:02
+  [Memory]
+    Average : 11.5%
+    Maximum : 12.8% at 2026-09-15 13:39:02
+    Minimum : 10.2% at 2026-09-15 13:38:03
+  [Disk]
+    Average : 1.0%
+    Maximum : 1.0% at 2026-09-15 13:38:03
+    Minimum : 1.0% at 2026-09-15 13:38:03
+  [Samples]
+    Data Points: 2 samples
+
+## 보너스 2: 날짜를 되돌린 파일로 7일/30일 규칙 재현
+
+$ ls -l --time-style=+%F /var/log/agent-app /var/log/monitor/agent-app/archive
+/var/log/agent-app:
+total 20
+-rw-rw----+ 1 agent-admin agent-core 7389 2026-09-15 agent_app.log
+-rw-rw----+ 1 agent-admin agent-core    0 2026-09-15 monitor-cron.err
+-rw-rw----+ 1 agent-admin agent-core  506 2026-09-15 monitor.log
+-rw-rw----+ 1 agent-admin agent-core    9 2026-09-07 old-worker.log
+-rw-rw----+ 1 agent-admin agent-core   12 2026-09-12 recent-worker.log
+
+/var/log/monitor/agent-app/archive:
+total 4
+-rw-r--r-- 1 agent-admin agent-core 28 2026-08-15 ancient.log.20260801.gz
+
+agent-admin$ $AGENT_HOME/bin/log-retention.sh
+[2026-09-15 13:40:02] [ARCHIVE] /var/log/agent-app/old-worker.log -> /var/log/monitor/agent-app/archive/old-worker.log.20260907.gz
+[2026-09-15 13:40:02] [DELETE] /var/log/monitor/agent-app/archive/ancient.log.20260801.gz
+[2026-09-15 13:40:02] [DONE] 압축 1건, 삭제 1건
+
+$ ls -l --time-style=+%F /var/log/agent-app /var/log/monitor/agent-app/archive
+/var/log/agent-app:
+total 16
+-rw-rw----+ 1 agent-admin agent-core 7389 2026-09-15 agent_app.log
+-rw-rw----+ 1 agent-admin agent-core    0 2026-09-15 monitor-cron.err
+-rw-rw----+ 1 agent-admin agent-core  506 2026-09-15 monitor.log
+-rw-rw----+ 1 agent-admin agent-core   12 2026-09-12 recent-worker.log
+
+/var/log/monitor/agent-app/archive:
+total 4
+-rw-rw-r-- 1 agent-admin agent-core 44 2026-09-07 old-worker.log.20260907.gz
+
+## 보너스 2 예외 처리
+
+agent-admin$ $AGENT_HOME/bin/log-retention.sh
+[2026-09-15 13:40:02] [INFO] 7일 이상 지난 로그가 없다.
+[2026-09-15 13:40:02] [INFO] 30일 이상 지난 아카이브가 없다.
+[2026-09-15 13:40:02] [DONE] 압축 0건, 삭제 0건
+
+agent-admin$ LOG_SRC=/var/log/no-such-dir $AGENT_HOME/bin/log-retention.sh; echo "exit=$?"
+[2026-09-15 13:40:02] [WARNING] 원본 로그 디렉터리가 없다: /var/log/no-such-dir (건너뜀)
+exit=0
+
+agent-test$ bash /tmp/log-retention-test.sh; echo "exit=$?"
+[2026-09-15 13:40:02] [WARNING] 아카이브 디렉터리를 만들거나 쓸 권한이 없다: /var/log/monitor/agent-app/archive (건너뜀)
+exit=0

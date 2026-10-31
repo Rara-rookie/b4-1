@@ -1,0 +1,33 @@
+# SSH 포트 변경(20022)과 root 원격 로그인 차단
+# 실행 시각: 2026-09-15 13:37:26 KST  호스트: agent-server  커널: 5.15.167.4-microsoft-standard-WSL2
+
+## 설정 전 상태
+
+$ grep -nE '^#?(Port|PermitRootLogin) ' /etc/ssh/sshd_config
+14:#Port 22
+33:#PermitRootLogin prohibit-password
+
+## 설정 변경(원본은 .orig 로 보존)
+
+$ sed -i -E 's/^#?Port .*/Port 20022/; s/^#?PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config
+
+$ grep -nE '^(Port|PermitRootLogin) ' /etc/ssh/sshd_config
+14:Port 20022
+33:PermitRootLogin no
+
+$ sshd -t && echo 'sshd 설정 문법 검사 통과'
+sshd 설정 문법 검사 통과
+
+## sshd 재시작과 리슨 확인
+
+$ /usr/sbin/sshd -E /var/log/sshd_auth.log && echo 'sshd started'
+sshd started
+
+$ sshd -T | grep -E '^(port|permitrootlogin) '
+port 20022
+permitrootlogin no
+
+$ ss -tulnp | grep sshd
+tcp   LISTEN 0      128          0.0.0.0:20022      0.0.0.0:*    users:(("sshd",pid=70,fd=4))
+tcp   LISTEN 0      128             [::]:20022         [::]:*    users:(("sshd",pid=70,fd=5))
+# root 원격 로그인 거부는 계정 생성 뒤 03 단계에서 실제 접속으로 검증한다.

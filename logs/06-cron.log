@@ -1,0 +1,35 @@
+# crontab 매분 실행 등록과 자동 누적 확인
+# 실행 시각: 2026-09-15 13:37:56 KST  호스트: agent-server  커널: 5.15.167.4-microsoft-standard-WSL2
+
+## cron 데몬
+
+$ service cron start >/dev/null 2>&1; service cron status
+ * cron is running
+
+## agent-admin crontab 등록
+
+$ crontab -u agent-admin /tmp/agent-admin.cron && crontab -l -u agent-admin
+# 매분 상태 점검. 콘솔 출력은 버리고 오류만 남긴다(monitor.log 에는 스크립트가 직접 쓴다).
+* * * * * /home/agent-admin/agent-app/bin/monitor.sh > /dev/null 2>> /var/log/agent-app/monitor-cron.err
+# 매일 03:10 로그 보존 정책(보너스 2)
+10 3 * * * /home/agent-admin/agent-app/bin/log-retention.sh >> /var/log/agent-app/retention.out 2>&1
+
+## 자동 실행 확인: 등록 직후와 2분 뒤 줄 수 비교
+
+$ date '+%F %T'; wc -l /var/log/agent-app/monitor.log; tail -2 /var/log/agent-app/monitor.log
+2026-09-15 13:37:57
+6 /var/log/agent-app/monitor.log
+[2026-09-15 13:37:38] [ERROR] port 15999 is not listening (PID:648)
+[2026-09-15 13:37:43] PID:648 CPU:1.4% MEM:10.5% DISK_USED:1%
+# 분 경계를 두 번 넘길 때까지 기다린다(약 125초).
+
+$ date '+%F %T'; wc -l /var/log/agent-app/monitor.log; tail -4 /var/log/agent-app/monitor.log
+2026-09-15 13:40:02
+8 /var/log/agent-app/monitor.log
+[2026-09-15 13:37:38] [ERROR] port 15999 is not listening (PID:648)
+[2026-09-15 13:37:43] PID:648 CPU:1.4% MEM:10.5% DISK_USED:1%
+[2026-09-15 13:38:03] PID:648 CPU:3.1% MEM:10.2% DISK_USED:1%
+[2026-09-15 13:39:02] PID:648 CPU:2.9% MEM:12.8% DISK_USED:1%
+# cron 이 추가한 줄: 2줄 (기대: 2줄 이상)
+
+$ cat /var/log/agent-app/monitor-cron.err 2>/dev/null || echo '(cron 오류 없음)'

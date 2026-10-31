@@ -1,0 +1,152 @@
+# 계정/그룹 생성, 디렉터리 권한(ACL), SSH 접속 검증
+# 실행 시각: 2026-09-15 13:37:30 KST  호스트: agent-server  커널: 5.15.167.4-microsoft-standard-WSL2
+
+## 그룹
+
+$ groupadd -f agent-common && groupadd -f agent-core
+
+## 계정 (다시 실행하면 그룹 소속만 맞춘다)
+
+$ useradd -m -s /bin/bash -G agent-common,agent-core agent-admin
+
+$ useradd -m -s /bin/bash -G agent-common,agent-core agent-dev
+
+$ useradd -m -s /bin/bash -G agent-common agent-test
+
+$ id agent-admin; id agent-dev; id agent-test
+uid=1000(agent-admin) gid=1002(agent-admin) groups=1002(agent-admin),1000(agent-common),1001(agent-core)
+uid=1001(agent-dev) gid=1003(agent-dev) groups=1003(agent-dev),1000(agent-common),1001(agent-core)
+uid=1002(agent-test) gid=1004(agent-test) groups=1004(agent-test),1000(agent-common)
+
+$ getent group agent-common agent-core
+agent-common:x:1000:agent-admin,agent-dev,agent-test
+agent-core:x:1001:agent-admin,agent-dev
+
+## 디렉터리 생성
+
+$ mkdir -p /home/agent-admin/agent-app/upload_files /home/agent-admin/agent-app/api_keys /home/agent-admin/agent-app/bin /var/log/agent-app /var/log/monitor/agent-app/archive
+
+## 권한 부여
+# Ubuntu 22.04 는 홈을 750 으로 만든다. 다른 계정이 AGENT_HOME 에 닿도록 목록 조회 없이 통과(x)만 허용한다.
+
+$ setfacl -m g:agent-common:--x /home/agent-admin
+
+$ chown agent-admin:agent-common /home/agent-admin/agent-app && chmod 750 /home/agent-admin/agent-app
+# upload_files: agent-common(admin, dev, test) 읽기/쓰기. setgid 와 기본 ACL 로 새 파일도 같은 그룹 권한을 물려받는다.
+
+$ chown agent-admin:agent-common /home/agent-admin/agent-app/upload_files && chmod 2770 /home/agent-admin/agent-app/upload_files
+
+$ setfacl -m g:agent-common:rwx -d -m g:agent-common:rwx /home/agent-admin/agent-app/upload_files
+# api_keys, /var/log/agent-app: agent-core(admin, dev)만 읽기/쓰기. others 는 권한 없음.
+
+$ chown agent-admin:agent-core /home/agent-admin/agent-app/api_keys && chmod 2770 /home/agent-admin/agent-app/api_keys
+
+$ setfacl -m g:agent-core:rwx -d -m g:agent-core:rwx /home/agent-admin/agent-app/api_keys
+
+$ chown agent-admin:agent-core /var/log/agent-app && chmod 2770 /var/log/agent-app
+
+$ setfacl -m g:agent-core:rwx -d -m g:agent-core:rwx /var/log/agent-app
+# bin: monitor.sh 작성자 agent-dev 소유, agent-core 는 읽기·실행만.
+
+$ chown agent-dev:agent-core /home/agent-admin/agent-app/bin && chmod 2750 /home/agent-admin/agent-app/bin
+
+$ chown -R agent-admin:agent-core /var/log/monitor && chmod -R 2770 /var/log/monitor
+
+## 확인: 소유/권한/ACL
+
+$ ls -ld /home/agent-admin /home/agent-admin/agent-app /home/agent-admin/agent-app/upload_files /home/agent-admin/agent-app/api_keys /home/agent-admin/agent-app/bin /var/log/agent-app
+drwxr-x---+ 3 agent-admin agent-admin  4096 Sep 15 13:37 /home/agent-admin
+drwxr-x---  5 agent-admin agent-common 4096 Sep 15 13:37 /home/agent-admin/agent-app
+drwxrws---+ 2 agent-admin agent-core   4096 Sep 15 13:37 /home/agent-admin/agent-app/api_keys
+drwxr-s---  2 agent-dev   agent-core   4096 Sep 15 13:37 /home/agent-admin/agent-app/bin
+drwxrws---+ 2 agent-admin agent-common 4096 Sep 15 13:37 /home/agent-admin/agent-app/upload_files
+drwxrws---+ 2 agent-admin agent-core   4096 Sep 15 13:37 /var/log/agent-app
+
+$ getfacl -p /home/agent-admin/agent-app/upload_files /home/agent-admin/agent-app/api_keys /var/log/agent-app
+# file: /home/agent-admin/agent-app/upload_files
+# owner: agent-admin
+# group: agent-common
+# flags: -s-
+user::rwx
+group::rwx
+group:agent-common:rwx
+mask::rwx
+other::---
+default:user::rwx
+default:group::rwx
+default:group:agent-common:rwx
+default:mask::rwx
+default:other::---
+
+# file: /home/agent-admin/agent-app/api_keys
+# owner: agent-admin
+# group: agent-core
+# flags: -s-
+user::rwx
+group::rwx
+group:agent-core:rwx
+mask::rwx
+other::---
+default:user::rwx
+default:group::rwx
+default:group:agent-core:rwx
+default:mask::rwx
+default:other::---
+
+# file: /var/log/agent-app
+# owner: agent-admin
+# group: agent-core
+# flags: -s-
+user::rwx
+group::rwx
+group:agent-core:rwx
+mask::rwx
+other::---
+default:user::rwx
+default:group::rwx
+default:group:agent-core:rwx
+default:mask::rwx
+default:other::---
+
+
+## 확인: 계정별 실제 접근
+
+agent-test$ touch /home/agent-admin/agent-app/upload_files/from-agent-test.txt && ls -l /home/agent-admin/agent-app/upload_files/from-agent-test.txt
+-rw-rw----+ 1 agent-test agent-common 0 Sep 15 13:37 /home/agent-admin/agent-app/upload_files/from-agent-test.txt
+
+agent-dev$ touch /home/agent-admin/agent-app/upload_files/from-agent-dev.txt && ls -l /home/agent-admin/agent-app/upload_files/from-agent-dev.txt
+-rw-rw----+ 1 agent-dev agent-common 0 Sep 15 13:37 /home/agent-admin/agent-app/upload_files/from-agent-dev.txt
+# agent-test 는 보안 디렉터리에 접근할 수 없어야 한다(Permission denied 가 정상).
+
+agent-test$ ls /home/agent-admin/agent-app/api_keys
+ls: cannot open directory '/home/agent-admin/agent-app/api_keys': Permission denied
+(exit 2)
+
+agent-test$ touch /var/log/agent-app/agent-test-probe.log
+touch: cannot touch '/var/log/agent-app/agent-test-probe.log': Permission denied
+(exit 1)
+
+agent-dev$ touch /home/agent-admin/agent-app/api_keys/.probe && rm /home/agent-admin/agent-app/api_keys/.probe && echo 'agent-dev: api_keys 읽기/쓰기 가능'
+agent-dev: api_keys 읽기/쓰기 가능
+
+agent-dev$ touch /var/log/agent-app/.probe && rm /var/log/agent-app/.probe && echo 'agent-dev: /var/log/agent-app 읽기/쓰기 가능'
+agent-dev: /var/log/agent-app 읽기/쓰기 가능
+
+## SSH 접속 검증: 20022 에서 일반 계정은 허용, root 는 거부
+# 같은 키를 root 와 agent-admin 양쪽에 등록했다. 결과가 갈리면 차이는 PermitRootLogin 뿐이다.
+
+$ ssh -i /root/.ssh/id_b41 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -p 20022 agent-admin@127.0.0.1 'echo login-ok: $(whoami)@$(hostname)'
+login-ok: agent-admin@agent-server
+
+$ ssh -i /root/.ssh/id_b41 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -p 20022 root@127.0.0.1 'echo root-login-should-not-happen'
+root@127.0.0.1: Permission denied (publickey,password).
+(exit 255)
+
+$ ssh -i /root/.ssh/id_b41 -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=3 -p 22 agent-admin@127.0.0.1 true
+ssh: connect to host 127.0.0.1 port 22: Connection refused
+(exit 255)
+
+$ grep -E 'ROOT LOGIN REFUSED|Accepted publickey' /var/log/sshd_auth.log | tail -4
+Accepted publickey for agent-admin from 127.0.0.1 port 56392 ssh2: ED25519 SHA256:AudRTtdooQDentuoV6pFlTGm4FB/EmBD1vyn0brglww
+ROOT LOGIN REFUSED FROM 127.0.0.1 port 56408
+ROOT LOGIN REFUSED FROM 127.0.0.1 port 56408 [preauth]
