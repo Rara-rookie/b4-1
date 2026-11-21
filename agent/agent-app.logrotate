@@ -1,0 +1,12 @@
+# /etc/logrotate.d/agent-app (설치 예시)
+# monitor.sh 는 이 설정 없이 스스로 회전하므로(10MB, 최대 10개) 이번 과제의 실행 경로에는 쓰이지 않는다.
+# logrotate 로 바꿀 때의 동등한 설정이다. logrotate 는 보통 cron.daily 로 하루 한 번 돌기 때문에
+# 매분 검사하는 스크립트 회전보다 한도 초과를 늦게 발견한다. 더 자주 돌리려면 시간 단위 cron 으로 호출한다.
+/var/log/agent-app/monitor.log {
+    size 10M
+    rotate 9
+    missingok
+    notifempty
+    nocompress
+    create 0660 agent-admin agent-core
+}

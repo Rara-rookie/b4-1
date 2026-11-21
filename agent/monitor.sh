@@ -32,6 +32,9 @@ DISK_LIMIT=80
 
 now() { date '+%Y-%m-%d %H:%M:%S'; }
 
+# 로그는 항상 '>>'(추가)로 쓴다. '>' 는 파일을 비우고 새로 쓰므로 매분 이전 기록이 사라진다.
+# 시각은 서버 시각대(Asia/Seoul)의 YYYY-MM-DD HH:MM:SS 형식이다.
+
 # 부동소수 비교: a > b 이면 참
 gt() { awk -v a="$1" -v b="$2" 'BEGIN { exit !(a > b) }'; }
 

@@ -67,6 +67,7 @@ b4-1/
 │   └── make-report.sh     logs/ 발췌로 docs/report.md 생성
 ├── agent/                 서버에 설치되는 파일
 │   ├── monitor.sh  report.sh  log-retention.sh
+│   ├── agent-app.logrotate  logrotate 설치 예시(실행 경로에서는 쓰지 않음)
 │   └── agent-app.env      /etc/profile.d/agent-app.sh
 ├── docs/report.md         요구사항 수행 내역서
 └── logs/                  단계별 증거
@@ -108,6 +109,85 @@ b4-1/
 | 중복 실행 | `flock -n` | 이전 회차가 돌고 있으면 건너뜀 |
 
 제공 앱은 PyInstaller 로 묶여 부트로더와 워커가 같은 이름으로 두 개 뜬다. `pgrep -n` 으로 나중에 뜬 워커 PID 를 쓴다.
+
+## 설계 근거와 운영 메모
+
+### 종료 코드와 알림 흐름
+
+| 종료 코드 | 의미 | 로그 | 운영 조치 |
+|---|---|---|---|
+| 0 | 정상, 또는 임계값 초과 경고(CPU 20%, MEM 10%, DISK 80%, 방화벽 비활성) | 한 줄 기록, 경고는 `[WARNING]` | 사람이 로그를 보고 판단한다. 서비스는 계속 돈다 |
+| 1 | 헬스체크 실패: 프로세스 없음 또는 포트 미리슨 | `[ERROR]` 를 기록하고 종료 | 즉시 조치 대상. cron 의 stderr 는 `monitor-cron.err` 에 남는다 |
+
+경고는 "곧 문제가 될 수 있음", 실패는 "지금 서비스가 죽었음"이라 종료 코드를 나눴다. 이번 과제에는 메일·메신저 알림이 없고, 알림을 붙인다면 `monitor.sh` 의 종료 코드 1 을 `|| 알림 명령` 으로 받는다.
+
+### `>` 와 `>>` 의 차이
+
+`>` 는 파일을 비우고 새로 쓰고(덮어쓰기), `>>` 는 기존 내용 뒤에 이어 쓴다(추가). 로그를 `>` 로 쓰면 매분 이전 기록이 사라지므로 `monitor.log` 는 항상 `>>` 로 쓴다.
+cron 줄 `monitor.sh > /dev/null 2>> monitor-cron.err` 에서 표준 출력(점검 화면용 출력)은 버리고, 표준 오류만 파일에 **누적**해 cron 단계의 오류를 남긴다.
+`monitor.sh` 안에서도 로그 기록은 모두 `>> "$LOG_FILE"`, 중복 실행 방지 잠금 파일은 `exec 9>>` 로 연다(내용을 지우지 않고 파일만 연다).
+
+### 로그 회전: logrotate 대신 스크립트를 쓴 이유
+
+과제는 "logrotate 사용 또는 스크립트 로직 구현"을 자유 선택으로 두었고, 이 구현은 스크립트(`monitor.sh` 의 `rotate_log`)를 택했다.
+
+| 기준 | 스크립트 회전(채택) | logrotate |
+|---|---|---|
+| 실행 시점 | monitor.sh 가 돌 때마다(매분) 크기 검사 | 보통 cron.daily 로 하루 한 번 |
+| 설치 | `monitor.sh` 하나로 끝, 컨테이너에서도 동작 | 패키지와 `/etc/logrotate.d/` 설정이 필요 |
+| 시험 | `MONITOR_MAX_BYTES=300` 처럼 한도를 낮춰 회전을 재현(`logs/05-monitor.log`) | `logrotate -d`/`-f` 로 확인 |
+| 기능 | 이름 밀기(`.1`~`.9`)만 | 압축, 지연 압축, 사후 스크립트, 상태 파일 |
+
+운영에서 로그 종류가 많아지면 logrotate 가 더 표준적이다. 동등한 설정 예시는 [agent/agent-app.logrotate](agent/agent-app.logrotate)(`size 10M`, `rotate 9`)에 두었고 `logrotate -d` 로 문법을 확인했다. 실행 경로에서는 쓰이지 않는다.
+
+### SSH 위협 모델
+
+| 위협 | 설명 | 이번 대응 | 추가로 권장하는 대응 |
+|---|---|---|---|
+| 자동 스캔과 무차별 대입 | 인터넷의 봇이 22번 포트와 root 계정에 암호를 대입한다 | 기본 포트 22 → 20022 로 노출을 줄이고, root 원격 로그인 차단(`PermitRootLogin no`), UFW 로 20022·15034 외 차단 | 키 인증만 허용(`PasswordAuthentication no`), `fail2ban` 으로 반복 실패 IP 차단, `ufw limit 20022/tcp` 로 연결 빈도 제한 |
+| 권한 상승 | root 가 뚫리면 서버 전체가 넘어간다 | root 직접 접속 금지, 일반 계정(agent-admin)으로 접속 후 필요한 명령만 sudo(`ufw status` 한 줄) | 접속 허용 계정 목록(`AllowUsers`) |
+
+포트 변경은 스캐너를 피하는 정도의 난독화이고 보안의 본질이 아니다. 실제 방어는 root 차단과 인증 강화, 방화벽이다.
+
+### 도구와 옵션을 고른 이유
+
+| 대상 | 선택 | 이유 |
+|---|---|---|
+| 방화벽 | UFW | Ubuntu 기본 도구이고 명령이 짧다. firewalld 는 RHEL 계열 기본이라 이번 Ubuntu 22.04 환경과 맞지 않는다 |
+| 포트 확인 | `ss -Hltn "sport = :15034"` | `netstat` 은 net-tools 패키지로 구식이고 기본 설치가 아니다. `ss` 는 iproute2 에 있어 컨테이너에도 있고 필터(`sport =`)와 `-H`(머리글 없음)로 스크립트에서 다루기 쉽다 |
+| 프로세스 확인 | `pgrep -n -x agent-app` | `-x` 로 이름이 정확히 같은 것만, `-n` 으로 가장 나중에 뜬 워커를 고른다. PyInstaller 앱은 부트로더와 워커가 같은 이름으로 둘 뜬다 |
+| CPU | `/proc/stat` 1초 간격 두 번 | `top`/`ps` 의 출력 형식에 의존하지 않고, 두 시점의 누적 tick 차이로 구간 사용률을 구한다. 계산식: (전체 증가량 - (idle+iowait) 증가량) × 100 / 전체 증가량, 단위 % |
+| MEM | `/proc/meminfo` 의 `MemAvailable` | 회수 가능한 캐시를 사용량에서 뺀다. (MemTotal - MemAvailable) × 100 / MemTotal, 단위 % |
+| DISK | `df -P /` 의 Use% | `-P` 로 줄바꿈 없는 POSIX 형식을 고정해 5번째 필드를 안정적으로 읽는다 |
+| 계정 생성 | `useradd -m -s /bin/bash -G <그룹>` | `-m` 홈 디렉터리 생성, `-s` 로그인 셸 지정, `-G` 보조 그룹 지정. 비밀번호는 설정하지 않아 키·`su` 로만 접근한다 |
+
+### 포트 미개방 진단 순서
+
+프로세스는 있는데 포트가 안 열리면(`[ERROR] port 15999 is not listening`) 다음 순서로 본다.
+1. `ss -tlnp | grep <포트>` — 리슨 자체가 있는지, 있다면 어느 프로세스가 쥐고 있는지(다른 프로세스가 포트를 점유한 경우)
+2. 앱 로그 마지막 구간 — 바인딩 오류(`Address already in use`)나 설정 포트 불일치
+3. `ufw status` — 리슨은 되는데 방화벽이 막는 경우(외부에서만 안 되는 증상)
+4. `ss -tlnp` 의 바인딩 주소 — `127.0.0.1` 로만 열려 있으면 외부 접속이 안 된다
+
+### 로그가 급증할 때의 임시 대응
+
+1. `du -sh /var/log/agent-app/*` 와 `df -h /` 로 어느 파일이 얼마나 커졌는지 확인한다.
+2. 크기가 자라는 파일은 삭제하지 않고 `: > 파일`(내용만 비움)로 줄인다. 앱이 파일을 열어 둔 채 쓰고 있어 `rm` 하면 공간이 반환되지 않는다.
+3. 보존 대상 로그는 `log-retention.sh` 를 수동 실행해 7일 이상 된 것을 압축·이동한다.
+4. 디스크 사용률은 `monitor.sh` 가 80% 초과 시 `[WARNING]` 으로 남기므로, 이 경고가 나오면 위 절차를 서버 관리자(agent-admin)가 수행한다.
+
+### 다른 웹서버로 바꿀 때의 점검표
+
+`monitor.sh` 는 환경변수로 대상을 바꾼다. 아래를 확인하고 설정한다.
+
+| 점검 항목 | 확인할 것 | 설정 |
+|---|---|---|
+| 프로세스 이름 | `pgrep -a nginx`(예)로 실제 이름과 마스터/워커 구조 | `MONITOR_PROCESS=nginx` |
+| 포트 | `ss -tlnp` 로 리슨 포트(80, 443 등) | `MONITOR_PORT=443` |
+| 방화벽 | 새 포트를 UFW 가 허용하는지 | `ufw allow 443/tcp` |
+| 임계값 | 웹서버의 평상시 CPU·MEM 분포를 먼저 측정해 `CPU_LIMIT`, `MEM_LIMIT`, `DISK_LIMIT` 조정(현재 20/10/80) | `monitor.sh` 상단 |
+| 로그 위치와 크기 | 서버 자체 로그(`/var/log/nginx` 등)는 logrotate 로 회전, `monitor.log` 는 `MONITOR_LOG`, `MONITOR_MAX_BYTES`, `MONITOR_KEEP` | 환경변수 |
+| 실행 권한 | cron 실행 계정이 대상 프로세스를 볼 수 있는지 | crontab 소유 계정 |
 
 ## 컨테이너라서 다르게 처리한 것
 
